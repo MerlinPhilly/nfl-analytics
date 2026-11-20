@@ -1,0 +1,77 @@
+name: Update data
+
+# Rebuilds the whole database from nflverse each run (about 2 minutes), so there's
+# no separate history load and nothing to resume if a run fails.
+
+on:
+  schedule:
+    - cron: "41 10 * * *"   # 10:41 UTC = 5:41 AM Eastern (6:41 during daylight time)
+    - cron: "41 16 * * *"   # 11:41 AM Eastern: picks up nflverse's later corrections
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: nfl-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Download nflverse data and build database
+        run: python -m nfl.ingest
+
+      - name: Check the data
+        run: python -m pytest tests -q
+
+      - name: Build site
+        run: |
+          mkdir -p _site
+          cp -r site/* _site/
+          # Stamp asset URLs with the commit so browsers load the new version right away
+          sed -i "s/app.js\"/app.js?v=${GITHUB_SHA::8}\"/; s/style.css\"/style.css?v=${GITHUB_SHA::8}\"/" _site/index.html
+          python -m nfl.export --out _site/data
+
+      - name: Save database as a download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view data-store >/dev/null 2>&1 || gh release create data-store --title "Database" --notes "Latest nfl.duckdb, replaced on every run."
+          gh release upload data-store data/nfl.duckdb --clobber
+
+      - name: Record run status
+        # A small commit keeps GitHub from pausing the schedule after 60 quiet days.
+        run: |
+          python -c "import json; m=json.load(open('_site/data/meta.json')); w=m['last_week']; open('STATUS.md','w').write(f\"# Data status\n\n- Last refresh: {m['updated_at']}\n- Games through: {m['last_game']} ({w['season']} week {w['week']})\n- Games: {m['counts']['games']:,}\n- Player game rows: {m['counts']['player_games']:,}\n- Players: {m['counts']['players']:,}\n\")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add STATUS.md
+          git diff --cached --quiet || (git commit -m "Data refresh" && git push)
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: update
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

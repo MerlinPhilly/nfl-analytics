@@ -1,0 +1,6 @@
+duckdb>=1.1
+pandas>=2.0
+pyarrow>=14
+requests>=2.31
+numpy>=1.26
+pytest>=8
