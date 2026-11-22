@@ -1,6 +1,6 @@
 # Data status
 
-- Last refresh: 2026-11-21T21:52:16+00:00
+- Last refresh: 2026-11-22T18:02:35+00:00
 - Games through: 2026-11-19 (2026 week 11)
 - Games: 1,575
 - Player game rows: 105,361
